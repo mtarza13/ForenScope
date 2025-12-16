@@ -1,73 +1,225 @@
 from __future__ import annotations
 
+import json
 import os
+import signal
 import traceback
-from typing import Type
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import timezone
+from io import StringIO
+from pathlib import Path
+from typing import Any, Type
 
 from redis import Redis
-from rq import Connection, Queue, Worker
+from rq import Queue, Worker
 
 from eviforge.config import load_settings
-from eviforge.core.db import create_session_factory
-from eviforge.core.models import JobStatus
-from eviforge.core.jobs import update_job_status
+from eviforge.core.db import create_session_factory, utcnow
+from eviforge.core.models import Job, JobStatus
+from eviforge.core.sanitize import sanitize_text
 from eviforge.modules.base import ForensicModule
 
-# Registry of available modules
-# Format: { "tool_name": ModuleClass }
+
 MODULE_REGISTRY: dict[str, Type[ForensicModule]] = {}
+
 
 def register_module(module_cls: Type[ForensicModule]) -> None:
     MODULE_REGISTRY[module_cls().name] = module_cls
 
 
-def execute_module_task(job_id: str, tool_name: str, params: dict, **kwargs) -> dict:
-    """
-    RQ Task: Execute a forensic module.
-    """
+def ensure_modules_registered() -> None:
+    if MODULE_REGISTRY:
+        return
+
+    from eviforge.modules.inventory import InventoryModule
+    from eviforge.modules.strings import StringsModule
+    from eviforge.modules.timeline import TimelineModule
+    from eviforge.modules.parse_text import ParseTextModule
+    from eviforge.modules.exif import ExifModule
+    from eviforge.modules.triage import TriageModule
+
+    register_module(InventoryModule)
+    register_module(StringsModule)
+    register_module(TimelineModule)
+    register_module(ParseTextModule)
+    register_module(ExifModule)
+    register_module(TriageModule)
+
+
+class _Timeout(Exception):
+    pass
+
+
+def _with_alarm(timeout_seconds: int):
+    def handler(_signum, _frame):
+        raise _Timeout(f"Job timed out after {timeout_seconds}s")
+
+    old = signal.signal(signal.SIGALRM, handler)
+    signal.alarm(timeout_seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+def _extract_output_files(result: dict[str, Any], *, artifacts_root: Path) -> list[str]:
+    out: list[str] = []
+    output_file = result.get("output_file")
+    if isinstance(output_file, str):
+        try:
+            p = Path(output_file).resolve()
+            rel = p.relative_to(artifacts_root.resolve())
+            out.append(rel.as_posix())
+        except Exception:
+            pass
+    output_files = result.get("output_files")
+    if isinstance(output_files, list):
+        for item in output_files:
+            if isinstance(item, str):
+                try:
+                    p = Path(item).resolve()
+                    rel = p.relative_to(artifacts_root.resolve())
+                    out.append(rel.as_posix())
+                except Exception:
+                    continue
+    # de-dupe while preserving order
+    seen = set()
+    uniq: list[str] = []
+    for p in out:
+        if p in seen:
+            continue
+        seen.add(p)
+        uniq.append(p)
+    return uniq
+
+
+def _result_preview(result: dict[str, Any]) -> dict[str, Any]:
+    # Keep small, stable fields; avoid dumping huge arrays.
+    preview: dict[str, Any] = {}
+    for key in ("status", "error", "file_count", "count", "event_count", "parsed_objects", "tags_found", "entropy", "mime_magic", "mime_guessed", "is_suspicious", "limit_reached"):
+        if key in result:
+            preview[key] = result.get(key)
+    if "output_file" in result:
+        preview["output_file"] = result.get("output_file")
+    return preview
+
+
+def execute_module_task(job_id: str) -> dict[str, Any]:
+    """RQ Task: execute a queued Job by id."""
+    ensure_modules_registered()
     settings = load_settings()
     SessionLocal = create_session_factory(settings.database_url)
-    
-    print(f"[*] Worker: Starting Job {job_id} ({tool_name})")
-    
+
+    timeout_seconds = int(os.getenv("EVIFORGE_JOB_TIMEOUT_SECONDS", "900"))
+
     with SessionLocal() as session:
-        update_job_status(session, job_id, JobStatus.RUNNING)
-        
+        job = session.get(Job, job_id)
+        if not job:
+            raise ValueError(f"Job with ID {job_id} not found")
+
+        job.status = JobStatus.RUNNING
+        job.started_at = utcnow()
+        session.add(job)
+        session.commit()
+
+        params = {}
+        if job.params_json:
+            try:
+                params = json.loads(job.params_json)
+            except Exception:
+                params = {}
+
+        tool_name = job.tool_name
+        if tool_name not in MODULE_REGISTRY:
+            job.status = JobStatus.FAILED
+            job.error_message = f"Unknown module: {tool_name}"
+            job.completed_at = utcnow()
+            session.add(job)
+            session.commit()
+            raise ValueError(job.error_message)
+
+        evidence_id = job.evidence_id or params.get("evidence_id")
+        if not evidence_id:
+            job.status = JobStatus.FAILED
+            job.error_message = "Missing evidence_id"
+            job.completed_at = utcnow()
+            session.add(job)
+            session.commit()
+            raise ValueError(job.error_message)
+
+        mod = MODULE_REGISTRY[tool_name]()
+        stdout_buf = StringIO()
+        stderr_buf = StringIO()
+
         try:
-            if tool_name not in MODULE_REGISTRY:
-                raise ValueError(f"Module '{tool_name}' not found. Available: {list(MODULE_REGISTRY.keys())}")
-            
-            module_cls = MODULE_REGISTRY[tool_name]
-            module = module_cls()
-            
-            # Run the module
-            # params might contain 'evidence_id' etc.
-            result = module.run(**params)
-            
-            update_job_status(session, job_id, JobStatus.COMPLETED, result=result)
-            print(f"[*] Worker: Job {job_id} COMPLETED")
-            return result
-            
+            # Best-effort resource limits (Linux)
+            try:
+                import resource
+
+                cpu_limit = int(os.getenv("EVIFORGE_JOB_CPU_SECONDS", str(timeout_seconds + 5)))
+                mem_mb = int(os.getenv("EVIFORGE_JOB_MAX_MB", "1024"))
+                resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
+                resource.setrlimit(resource.RLIMIT_AS, (mem_mb * 1024 * 1024, mem_mb * 1024 * 1024))
+            except Exception:
+                pass
+
+            from contextlib import contextmanager
+
+            @contextmanager
+            def alarm_ctx():
+                def handler(_signum, _frame):
+                    raise _Timeout(f"Job timed out after {timeout_seconds}s")
+
+                old = signal.signal(signal.SIGALRM, handler)
+                signal.alarm(timeout_seconds)
+                try:
+                    yield
+                finally:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old)
+
+            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf), alarm_ctx():
+                result = mod.run(job.case_id, evidence_id, **(params or {}))
+                if not isinstance(result, dict):
+                    raise ValueError("Module returned non-dict result")
+
+            artifacts_root = (settings.vault_dir / job.case_id / "artifacts")
+            output_files = _extract_output_files(result, artifacts_root=artifacts_root)
+            preview = _result_preview(result)
+
+            job.stdout_text = sanitize_text(stdout_buf.getvalue())
+            job.stderr_text = sanitize_text(stderr_buf.getvalue())
+            job.output_files_json = json.dumps(output_files, sort_keys=False)
+            job.result_preview_json = json.dumps(preview, sort_keys=True)
+            job.result_json = json.dumps(result, sort_keys=True)
+            job.status = JobStatus.COMPLETED
+            job.completed_at = utcnow()
+            session.add(job)
+            session.commit()
+            return {"job_id": job.id, "status": job.status, "output_files": output_files, "preview": preview}
+
         except Exception as e:
-            error_msg = f"{str(e)}\n{traceback.format_exc()}"
-            update_job_status(session, job_id, JobStatus.FAILED, error=error_msg)
-            print(f"[*] Worker: Job {job_id} FAILED: {e}")
-            raise e  # Let RQ know it failed
+            err = sanitize_text(f"{e}\n{traceback.format_exc()}")
+            job.stdout_text = sanitize_text(stdout_buf.getvalue())
+            job.stderr_text = sanitize_text(stderr_buf.getvalue())
+            job.error_message = err
+            job.status = JobStatus.FAILED
+            job.completed_at = utcnow()
+            session.add(job)
+            session.commit()
+            raise
 
 
 def main() -> None:
     settings = load_settings()
     redis_url = os.getenv("EVIFORGE_REDIS_URL", settings.redis_url)
 
-    # Pre-load modules here if needed
-    # from eviforge.modules.inventory import InventoryModule
-    # register_module(InventoryModule)
-
+    ensure_modules_registered()
     conn = Redis.from_url(redis_url)
-    with Connection(conn):
-        q = Queue("default")
-        worker = Worker([q])
-        worker.work(with_scheduler=False)
+    q = Queue("default", connection=conn)
+    worker = Worker([q], connection=conn)
+    worker.work(with_scheduler=False)
 
 
 if __name__ == "__main__":
