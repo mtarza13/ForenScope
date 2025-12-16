@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eviforge"
+version = "0.1.0"
+description = "Offline-first digital forensics platform (local-first, defensible)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+	"fastapi>=0.115",
+	"uvicorn[standard]>=0.30",
+	"pydantic>=2.8",
+	"typer>=0.12",
+	"rich>=13.7",
+	"SQLAlchemy>=2.0",
+	"redis>=5.0",
+	"rq>=1.16",
+]
+
+[project.optional-dependencies]
+html = ["Jinja2>=3.1"]
+postgres = ["psycopg[binary]>=3.2"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+eviforge = "eviforge.cli:main"
+dfir = "dfirlab.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

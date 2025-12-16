@@ -1,0 +1,23 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+
+# Evidence / case data (do not commit)
+cases/
+demo_evidence/
+demo.img
+vault/
+import/
+
+# Local artifacts
+artifacts/
+*.log
+*.sqlite
+*.db
