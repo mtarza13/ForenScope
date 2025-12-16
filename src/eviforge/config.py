@@ -35,3 +35,5 @@ def load_settings() -> Settings:
         bind_host=bind_host,
         bind_port=bind_port,
     )
+
+# Rev 21
