@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - EviForge{% endblock %}
+
+{% block content %}
+<div class="layout-grid" style="min-height:auto; display:block;">
+    <div class="flex between mb-4">
+        <h2>Dashboard</h2>
+        <button onclick="document.getElementById('createCaseModal').style.display='block'" class="btn btn-primary">
+            + New Case
+        </button>
+    </div>
+
+    <!-- Quick Stats -->
+    <div
+        style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+        <div class="card" style="text-align:center;">
+            <div class="text-muted text-sm uppercase">Active Cases</div>
+            <div class="text-xl font-bold mt-1" id="statsCases">-</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <div class="text-muted text-sm uppercase">Jobs Running</div>
+            <div class="text-xl font-bold mt-1" id="statsJobs">-</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <div class="text-muted text-sm uppercase">Evidence items</div>
+            <div class="text-xl font-bold mt-1" id="statsEvidence">-</div>
+        </div>
+    </div>
+
+    <!-- Cases List -->
+    <div class="card">
+        <h3>Recent Cases</h3>
+        <table id="casesTable">
+            <thead>
+                <tr>
+                    <th>Case Name</th>
+                    <th>ID</th>
+                    <th>Created</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="4" class="text-muted text-center">Loading cases...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Simple Modal for Create Case -->
+<div id="createCaseModal"
+    style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+    <div class="card" style="max-width:400px; margin: 10% auto; position:relative;">
+        <h3>Create New Case</h3>
+        <form id="createCaseForm" class="mt-2">
+            <input type="text" id="caseName" placeholder="Case Name (e.g. Operation-X)" required
+                style="width:100%; box-sizing:border-box;">
+            <div class="flex mt-2" style="justify-content:flex-end;">
+                <button type="button" class="btn btn-outline"
+                    onclick="document.getElementById('createCaseModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function loadDashboard() {
+        const res = await apiFetch('/api/cases');
+        if (!res.ok) return;
+        const cases = await res.json();
+
+        // Update Stats (naive)
+        document.getElementById('statsCases').innerText = cases.length;
+        document.getElementById('statsJobs').innerText = "0"; // Placeholder until jobs API supports global list
+        document.getElementById('statsEvidence').innerText = "-"; // Requires aggregation
+
+        // Render Table
+        const tbody = document.querySelector('#casesTable tbody');
+        if (cases.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No cases found. Create one to get started.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = cases.map(c => `
+            <tr>
+                <td style="font-weight:600; color:var(--secondary);">${c.name}</td>
+                <td class="text-mono text-sm text-muted">${c.id.substring(0, 8)}...</td>
+                <td class="text-sm">${new Date(c.created_at).toLocaleDateString()}</td>
+                <td><a href="/web/cases/${c.id}" class="btn btn-sm btn-primary">Open Case</a></td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('createCaseForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('caseName').value;
+        const res = await apiFetch('/api/cases', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        if (res.ok) {
+            document.getElementById('caseName').value = '';
+            document.getElementById('createCaseModal').style.display = 'none';
+            loadDashboard();
+        } else {
+            alert('Failed to create case');
+        }
+    });
+
+    loadDashboard();
+</script>
+{% endblock %}

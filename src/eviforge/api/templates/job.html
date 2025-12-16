@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Job Details - EviForge{% endblock %}
+
+{% block content %}
+<div style="min-height:auto; display:block;">
+    <div class="flex between mb-4">
+        <div>
+            <div class="text-sm text-muted" id="jobBreadcrumb">
+                <a href="/web">Dashboard</a> / Job
+            </div>
+            <h2 class="mt-1" id="jobTitle">Job</h2>
+        </div>
+        <div class="flex">
+            <span class="badge badge-info text-mono" id="jobId">{{ job_id }}</span>
+            <span class="badge badge-warning" id="jobStatus">LOADING</span>
+        </div>
+    </div>
+
+    <div style="grid-template-columns: 2fr 1fr; gap:1.5rem; display:grid;">
+        <div class="card">
+            <h3>Execution Log</h3>
+            <div class="text-muted text-sm mb-2">Stdout / stderr capture from the worker.</div>
+            <pre class="pre-block" id="jobLog">Loading…</pre>
+            <div class="mt-2" id="jobErrorWrap" style="display:none;">
+                <h4 class="text-danger">Error</h4>
+                <pre class="pre-block" id="jobError"></pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Metadata</h3>
+            <table>
+                <tr><td><strong>Tool</strong></td><td class="text-right text-mono text-sm" id="jobTool">-</td></tr>
+                <tr><td><strong>Queued</strong></td><td class="text-right text-mono text-sm" id="jobQueued">-</td></tr>
+                <tr><td><strong>Started</strong></td><td class="text-right text-mono text-sm" id="jobStarted">-</td></tr>
+                <tr><td><strong>Completed</strong></td><td class="text-right text-mono text-sm" id="jobCompleted">-</td></tr>
+            </table>
+
+            <h3 class="mt-2">Artifacts</h3>
+            <div id="jobArtifacts" class="text-muted text-sm">Loading…</div>
+
+            <h3 class="mt-2">Result Preview</h3>
+            <pre class="pre-block" id="jobPreview">-</pre>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const jobId = {{ job_id | tojson }};
+
+    function fmt(ts) {
+        if (!ts) return '-';
+        try { return new Date(ts).toISOString().replace('T', ' ').replace('Z', ''); } catch { return String(ts); }
+    }
+
+    function setStatus(status) {
+        const el = document.getElementById('jobStatus');
+        el.textContent = status || 'UNKNOWN';
+        el.className = 'badge ' + (
+            status === 'COMPLETED' ? 'badge-success' :
+            status === 'FAILED' ? 'badge-danger' :
+            status === 'RUNNING' ? 'badge-warning' :
+            'badge-info'
+        );
+    }
+
+    async function loadJob() {
+        const res = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+        if (!res.ok) {
+            document.getElementById('jobLog').textContent = `Failed to load job (${res.status}).`;
+            return;
+        }
+        const job = await res.json();
+
+        document.getElementById('jobTitle').textContent = `Job: ${job.tool}`;
+        setStatus(job.status);
+
+        const bc = document.getElementById('jobBreadcrumb');
+        bc.innerHTML = `<a href="/web">Dashboard</a> / <a href="/web/cases/${job.case_id}">Case</a> / Job`;
+
+        document.getElementById('jobTool').textContent = job.tool || '-';
+        document.getElementById('jobQueued').textContent = fmt(job.queued_at);
+        document.getElementById('jobStarted').textContent = fmt(job.started_at);
+        document.getElementById('jobCompleted').textContent = fmt(job.completed_at);
+
+        const logParts = [];
+        if (job.stdout) logParts.push(`--- STDOUT ---\n${job.stdout}`);
+        if (job.stderr) logParts.push(`--- STDERR ---\n${job.stderr}`);
+        document.getElementById('jobLog').textContent = logParts.length ? logParts.join('\n\n') : 'No output.';
+
+        if (job.error) {
+            document.getElementById('jobErrorWrap').style.display = 'block';
+            document.getElementById('jobError').textContent = job.error;
+        }
+
+        document.getElementById('jobPreview').textContent = job.result_preview ? JSON.stringify(job.result_preview, null, 2) : '-';
+
+        const art = document.getElementById('jobArtifacts');
+        const files = job.output_files || [];
+        if (!files.length) {
+            art.textContent = 'No artifacts produced.';
+            return;
+        }
+        const ul = document.createElement('ul');
+        ul.style.paddingLeft = '1rem';
+        for (const p of files) {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = `/api/artifacts/${encodeURIComponent(job.case_id)}/${p}`;
+            a.target = '_blank';
+            a.textContent = p;
+            li.appendChild(a);
+            ul.appendChild(li);
+        }
+        art.innerHTML = '';
+        art.appendChild(ul);
+    }
+
+    loadJob();
+</script>
+{% endblock %}

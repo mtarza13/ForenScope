@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}EviForge{% endblock %}</title>
+    <link rel="stylesheet" href="/static/app.css">
+    {% block head_extra %}{% endblock %}
+</head>
+
+<body>
+    <div class="layout-grid">
+        <header>
+            <div class="flex">
+                <h1>EviForge</h1>
+                <nav>
+                    <a href="/web" class="{% if request.url.path == '/web' %}active{% endif %}">Dashboard</a>
+                    <a href="/web/admin" class="{% if '/admin' in request.url.path %}active{% endif %}">Admin</a>
+                    <a href="/web/osint" class="{% if '/osint' in request.url.path %}active{% endif %}">OSINT &amp; Privacy</a>
+                </nav>
+            </div>
+            <div class="user-menu">
+                <button class="btn btn-sm btn-outline" id="themeToggle" type="button">Theme</button>
+                <a class="btn btn-sm btn-outline" href="/web/login" id="loginLink">Login</a>
+                <button class="btn btn-sm btn-outline" id="logoutBtn" type="button" style="display:none;">Logout</button>
+            </div>
+        </header>
+
+        <main>
+            <div class="container">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+
+        <footer style="text-align:center; padding: 1rem; color: #7f8c8d; font-size: 0.8rem;">
+            EviForge Community Edition &bull; Local-First DFIR
+        </footer>
+    </div>
+
+    <script>
+        function getAccessToken() {
+            return localStorage.getItem('eviforge_access_token');
+        }
+
+        function setAccessToken(token) {
+            localStorage.setItem('eviforge_access_token', token);
+            refreshAuthUI();
+        }
+
+        function clearAccessToken() {
+            localStorage.removeItem('eviforge_access_token');
+            refreshAuthUI();
+        }
+
+        function refreshAuthUI() {
+            const token = getAccessToken();
+            const loginLink = document.getElementById('loginLink');
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (!loginLink || !logoutBtn) return;
+            if (token) {
+                loginLink.style.display = 'none';
+                logoutBtn.style.display = 'inline-flex';
+            } else {
+                loginLink.style.display = 'inline-flex';
+                logoutBtn.style.display = 'none';
+            }
+        }
+
+        async function apiFetch(path, options = {}) {
+            const token = getAccessToken();
+            const headers = new Headers(options.headers || {});
+            if (token && !headers.has('Authorization')) {
+                headers.set('Authorization', `Bearer ${token}`);
+            }
+            if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+            const res = await fetch(path, { ...options, headers, credentials: 'same-origin' });
+            if (res.status === 401) {
+                const next = encodeURIComponent(window.location.pathname + window.location.search);
+                window.location.href = `/web/login?next=${next}`;
+                return res;
+            }
+            if (res.status === 428) {
+                const next = encodeURIComponent(window.location.pathname + window.location.search);
+                window.location.href = `/web/ack?next=${next}`;
+                return res;
+            }
+            return res;
+        }
+
+        function initTheme() {
+            const t = localStorage.getItem('eviforge_theme') || 'light';
+            document.body.classList.toggle('dark', t === 'dark');
+        }
+
+        function toggleTheme() {
+            const isDark = document.body.classList.toggle('dark');
+            localStorage.setItem('eviforge_theme', isDark ? 'dark' : 'light');
+        }
+
+        document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
+        document.getElementById('logoutBtn')?.addEventListener('click', () => {
+            clearAccessToken();
+            window.location.href = '/web/login';
+        });
+
+        initTheme();
+        refreshAuthUI();
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

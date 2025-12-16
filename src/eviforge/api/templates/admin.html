@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - EviForge{% endblock %}
+
+{% block content %}
+<div class="layout-grid" style="min-height:auto; display:block;">
+  <div class="flex between mb-4">
+    <div>
+      <div class="text-sm text-muted"> <a href="/web">Dashboard</a> / Admin</div>
+      <h2 class="mt-1">System Administration</h2>
+    </div>
+    <span class="badge badge-danger">Restricted Area</span>
+  </div>
+
+  <div class="layout-grid" style="grid-template-columns: 1fr 1fr; gap: 1.5rem; display:grid;">
+    <!-- Authorization -->
+    <div class="card">
+      <h3>Authorization Gate</h3>
+      <p class="mt-2 text-sm">
+        Status:
+        {% if acknowledged %}
+        <span class="badge badge-success">Acknowledged</span>
+        {% else %}
+        <span class="badge badge-warning">Action Required</span>
+        {% endif %}
+      </p>
+      <p class="text-muted text-sm mt-1">Legal authorization acknowledgement.</p>
+
+      <!-- Tabs -->
+      <div class="mb-4">
+        <button class="btn btn-sm btn-primary" onclick="showTab('system')">System Health</button>
+        <button class="btn btn-sm btn-secondary" onclick="showTab('audit')">Audit Log</button>
+      </div>
+
+      <!-- System Tab -->
+      <div id="tab-system">
+        <div class="card mb-4">
+          <h3>Authorization Status</h3>
+          <p>Required Text: <code class="text-sm bg-gray-100 p-1">{{ ack_required }}</code></p>
+          {% if not acknowledged %}
+          <div class="mt-2">
+            <button class="btn btn-primary" onclick="submitAck()">Is Authorized & Acknowledge</button>
+            <span id="ackResult" class="text-muted text-sm ml-2"></span>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Existing Tools Table logic here if needed, or keeping it simple -->
+        <div class="card">
+          <h3>Tool Status</h3>
+          <table class="table w-full">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Status</th>
+                <th>Version/Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tool in tools %}
+              <tr>
+                <td>{{ tool.name }}</td>
+                <td>
+                  {% if tool.enabled %}
+                  <span class="badge badge-success">Active</span>
+                  {% else %}
+                  <span class="badge badge-danger">Missing</span>
+                  {% endif %}
+                </td>
+                <td class="text-mono text-sm">{{ tool.version or tool.path or "N/A" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Audit Tab -->
+      <div id="tab-audit" style="display:none;">
+        <div class="card">
+          <h3>System Audit Log</h3>
+          <div style="overflow-x:auto;">
+            <table class="table w-full">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Actor</th>
+                  <th>Role</th>
+                  <th>Action</th>
+                  <th>Case</th>
+                  <th>Evidence</th>
+                  <th>Job</th>
+                  <th>IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for log in audit_log %}
+                <tr>
+                  <td class="text-mono text-sm">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                  <td class="text-mono text-sm">{{ log.actor_username or '-' }}</td>
+                  <td class="text-mono text-sm">{{ log.actor_role or '-' }}</td>
+                  <td><span class="badge badge-info">{{ log.action }}</span></td>
+                  <td class="text-mono text-sm">{% if log.case_id %}<a href="/web/cases/{{ log.case_id }}">{{ log.case_id[:8] }}...</a>{% else %}-{% endif %}</td>
+                  <td class="text-mono text-sm">{{ (log.evidence_id[:8] ~ '...') if log.evidence_id else '-' }}</td>
+                  <td class="text-mono text-sm">{% if log.job_id %}<a href="/web/jobs/{{ log.job_id }}">{{ log.job_id[:8] }}...</a>{% else %}-{% endif %}</td>
+                  <td class="text-mono text-sm">{{ log.remote_ip or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted">No audit events found.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config -->
+    <div class="card">
+      <h3>Configuration</h3>
+      <table class="mt-2">
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+        </tr>
+        <tr>
+          <td>Data Dir</td>
+          <td><code class="text-sm">{{ data_dir }}</code></td>
+        </tr>
+        <tr>
+          <td>Vault Dir</td>
+          <td><code class="text-sm">{{ vault_dir }}</code></td>
+        </tr>
+        <tr>
+          <td>DB Host</td>
+          <td><code class="text-sm">{{ database_url }}</code></td>
+        </tr>
+        <tr>
+          <td>Redis Host</td>
+          <td><code class="text-sm">{{ redis_url }}</code></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="ackRequiredJson">{{ ack_required|tojson }}</script>
+<script>
+  function showTab(name) {
+    document.getElementById('tab-system').style.display = name === 'system' ? 'block' : 'none';
+    document.getElementById('tab-audit').style.display = name === 'audit' ? 'block' : 'none';
+  }
+
+  async function submitAck() {
+    const requiredText = JSON.parse(document.getElementById('ackRequiredJson').textContent);
+    const res = await apiFetch('/api/auth/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: requiredText, actor: 'web-admin'})
+  });
+  const el = document.getElementById('ackResult');
+  if (res.ok) {
+    el.textContent = 'Stored. Reloading…';
+    setTimeout(() => window.location.reload(), 700);
+  } else {
+    el.textContent = 'Failed';
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Authorization Required - EviForge{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Authorization Required</h2>
+  <p class="text-muted">You must acknowledge the required authorization text before using the platform.</p>
+
+  <h3 class="mt-2">Required Text</h3>
+  <pre class="pre-block" id="ackText">Loading…</pre>
+
+  <div class="mt-2">
+    <button class="btn btn-primary" id="ackBtn" type="button">Acknowledge</button>
+    <span class="text-muted text-sm" id="ackStatus"></span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const nextUrl = {{ next | tojson }};
+  let requiredText = null;
+
+  async function loadAck() {
+    const res = await fetch('/api/auth/ack/status', { credentials: 'same-origin' });
+    if (!res.ok) {
+      document.getElementById('ackText').textContent = `Failed to load (${res.status}).`;
+      return;
+    }
+    const data = await res.json();
+    requiredText = data.required_text;
+    document.getElementById('ackText').textContent = requiredText || '';
+  }
+
+  async function submitAck() {
+    const btn = document.getElementById('ackBtn');
+    const status = document.getElementById('ackStatus');
+    btn.disabled = true;
+    status.textContent = 'Submitting…';
+    const res = await apiFetch('/api/auth/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: requiredText || '', actor: 'web' })
+    });
+    if (res.ok) {
+      status.textContent = 'Stored. Redirecting…';
+      window.location.href = nextUrl || '/web';
+    } else {
+      status.textContent = 'Failed.';
+      btn.disabled = false;
+    }
+  }
+
+  document.getElementById('ackBtn').addEventListener('click', submitAck);
+  loadAck();
+</script>
+{% endblock %}

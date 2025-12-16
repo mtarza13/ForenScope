@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Login - EviForge</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: var(--secondary);
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 400px;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <h2 style="text-align:center; color:var(--secondary); margin-top:0;">Agent Login</h2>
+        <div id="errorMsg" class="badge badge-danger mb-4"
+            style="display:none; width:100%; box-sizing:border-box; text-align:center; margin-bottom:1rem;"></div>
+
+        <form id="loginForm" onsubmit="handleLogin(event)">
+            <label class="text-sm font-bold text-muted">Username</label>
+            <input type="text" id="username" name="username" required autofocus
+                style="width:100%; box-sizing:border-box; margin-bottom:1rem;">
+
+            <label class="text-sm font-bold text-muted">Password</label>
+            <input type="password" id="password" name="password" required
+                style="width:100%; box-sizing:border-box; margin-bottom:1.5rem;">
+
+            <button type="submit" class="btn btn-primary"
+                style="width:100%; justify-content:center;">Authenticate</button>
+        </form>
+    </div>
+
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const form = document.getElementById('loginForm');
+            const user = form.username.value;
+            const pass = form.password.value;
+            const errDiv = document.getElementById('errorMsg');
+
+            const formData = new URLSearchParams();
+            formData.append('username', user);
+            formData.append('password', pass);
+
+            try {
+                const res = await fetch('/api/auth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.access_token) {
+                        localStorage.setItem('eviforge_access_token', data.access_token);
+                    }
+                    const next = (new URLSearchParams(window.location.search)).get('next');
+                    window.location.href = next || '/web';
+                } else {
+                    errDiv.innerText = "Invalid credentials";
+                    errDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errDiv.innerText = "Network error";
+                errDiv.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard - EviForge</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 0;
+            background: #f4f4f9;
+        }
+
+        header {
+            background: #c0392b;
+            color: white;
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header a {
+            color: white;
+            text-decoration: none;
+            margin-left: 1rem;
+            font-weight: bold;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .stat {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #c0392b;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div>
+            EviForge Admin
+        </div>
+        <nav>
+            <a href="/web">Main Dashboard</a>
+            <a href="/web/admin/tools">Tools Health</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <h1>Overview</h1>
+        <div class="grid">
+            <div class="card">
+                <h2>Users</h2>
+                <div class="stat" id="userCount">-</div>
+                <p>Registered Analysts</p>
+            </div>
+            <div class="card">
+                <h2>System Status</h2>
+                <div class="stat" id="sysStatus" style="font-size:1.5rem">Checking...</div>
+                <p>API & Services</p>
+            </div>
+            <div class="card">
+                <h2>Security</h2>
+                <p>Status: <span style="color:green; font-weight:bold;">Enforcing Auth</span></p>
+                <p style="font-size:0.9rem; color:#666;">JWT / RBAC Active</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('eviforge_token');
+        if (!token) window.location.href = '/web/admin/login';
+
+        function logout() {
+            localStorage.removeItem('eviforge_token');
+            window.location.href = '/web/admin/login';
+        }
+
+        // Mock data fetch for dashboard stats (Implement real stats endpoint later if needed)
+        document.getElementById('userCount').innerText = "1";
+
+        // Check health
+        fetch('/health')
+            .then(r => r.json())
+            .then(d => {
+                const el = document.getElementById('sysStatus');
+                el.innerText = d.item ? "ONLINE" : "OK"; // Format depends on health endpoint
+                el.style.color = "green";
+            })
+            .catch(() => {
+                document.getElementById('sysStatus').innerText = "OFFLINE";
+                document.getElementById('sysStatus').style.color = "red";
+            });
+    </script>
+</body>
+
+</html>

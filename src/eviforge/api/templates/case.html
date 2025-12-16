@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Case Details - EviForge{% endblock %}
+
+{% block content %}
+<div class="layout-grid" style="min-height:auto; display:block;">
+    <div class="flex between mb-4">
+        <div>
+            <div class="text-sm text-muted"> <a href="/web">Dashboard</a> / Case</div>
+            <h2 class="mt-1" id="caseTitleDisplay">Loading...</h2>
+        </div>
+        <div class="flex">
+            <span class="badge badge-info" id="caseIdBadge">{{ case_id }}</span>
+        </div>
+    </div>
+
+    <!-- Tabs Layout -->
+    <div class="tabs">
+        <div class="tab-btn active" onclick="switchTab('evidence')">Evidence Vault</div>
+        <div class="tab-btn" onclick="switchTab('jobs')">Jobs & Modules</div>
+        <div class="tab-btn" onclick="switchTab('iocs')">IOCs & Findings</div>
+    </div>
+
+    <!-- EVIDENCE TAB -->
+    <div id="evidence" class="tab-content active">
+        <div class="card">
+            <div class="flex between mb-4">
+                <h3>Evidence Items</h3>
+                <div class="flex">
+                    <input type="text" id="importFilename" placeholder="File in /import (e.g. disk.img)">
+                    <button onclick="ingestEvidence()" class="btn btn-primary">Ingest</button>
+                </div>
+            </div>
+
+            <table id="evidenceTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Filename</th>
+                        <th>Size</th>
+                        <th>Ingested</th>
+                        <th>Integrity (SHA256)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="5" class="text-muted text-center">Loading evidence...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- JOBS TAB -->
+    <div id="jobs" class="tab-content">
+        <div class="card">
+            <div class="flex between mb-4">
+                <h3>Forensic Modules</h3>
+                <div class="flex">
+                    <select id="moduleSelect">
+                        <option value="" disabled selected>Select Module...</option>
+                        <option value="inventory">Inventory (List Files)</option>
+                        <option value="strings">Strings Extraction</option>
+                        <option value="timeline">Timeline (MACE)</option>
+                        <option value="parse_text">Parse Text (Tika)</option>
+                        <option value="exif">Exif Metadata</option>
+                        <option value="triage">Triage (Entropy/Type)</option>
+                    </select>
+                    <input type="text" id="targetEvidenceId" placeholder="Evidence UUID">
+                    <button onclick="runJob()" class="btn btn-primary">Run Module</button>
+                </div>
+            </div>
+
+            <table id="jobsTable">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Status</th>
+                        <th>Created At</th>
+                        <th>Results / Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="4" class="text-muted text-center">Loading jobs...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- IOCS TAB -->
+    <div id="iocs" class="tab-content">
+        <div class="layout-grid" style="grid-template-columns: 1fr 1fr; gap: 1.5rem; display:grid;">
+            <!-- Findings (Left) -->
+            <div class="card">
+                <h3>System Findings</h3>
+                <div id="findingsList" style="display:flex; flex-direction:column; gap:0.5rem;">
+                    <div class="text-muted text-center p-4">Loading matches...</div>
+                </div>
+            </div>
+
+            <!-- IOC Management (Right) -->
+            <div class="card">
+                <div class="flex between mb-4">
+                    <h3>IOC Watchlist</h3>
+                </div>
+                <div class="flex mb-4">
+                    <select id="iocType" style="width:100px;">
+                        <option value="ip">IP</option>
+                        <option value="domain">Domain</option>
+                        <option value="md5">MD5</option>
+                    </select>
+                    <input type="text" id="iocValue" placeholder="Value (e.g. 1.2.3.4)" style="flex-grow:1;">
+                    <button onclick="addIOC()" class="btn btn-outline">Add</button>
+                </div>
+
+                <table id="iocListTable">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Value</th>
+                            <th>Con.</th>
+                            <th>Added</th>
+                        </tr>
+                    </thead>
+                    <tbody id="iocList">
+                        <tr>
+                            <td colspan="4" class="text-muted text-center">No IOCs.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const CASE_ID = "{{ case_id }}";
+
+    // Tab Logic
+    function switchTab(tabId) {
+        // Toggle Buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('onclick').includes(tabId));
+        });
+        // Toggle Content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+            if (content.id === tabId) content.classList.add('active');
+        });
+
+        // Lazy Load
+        if (tabId === 'evidence') loadEvidence();
+        if (tabId === 'jobs') loadJobs();
+        if (tabId === 'iocs') { loadIOCs(); loadMatches(); }
+    }
+
+    // --- DATA LOADING ---
+    async function loadData() {
+        try {
+            const caseRes = await apiFetch(`/api/cases/${CASE_ID}`);
+            if (caseRes.ok) {
+                const c = await caseRes.json();
+                document.getElementById('caseTitleDisplay').innerText = c.name;
+                // document.title = `Case ${c.name} - EviForge`;
+            }
+            loadEvidence();
+            loadJobs();
+        } catch (e) { console.error(e); }
+    }
+
+    // --- EVIDENCE ---
+    async function loadEvidence() {
+        const res = await apiFetch(`/api/cases/${CASE_ID}/evidence`);
+        const tbody = document.querySelector('#evidenceTable tbody');
+        if (!res.ok) return;
+
+        const items = await res.json();
+        if (items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No evidence ingested yet.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = items.map(ev => `
+            <tr>
+                <td class="text-mono text-sm text-muted">${ev.id.substring(0, 8)}</td>
+                <td style="font-weight:500;">${ev.filename}</td>
+                <td class="text-sm">${(ev.size / 1024).toFixed(2)} KB</td>
+                <td class="text-sm text-muted">${new Date(ev.ingested_at).toLocaleString()}</td>
+                <td class="text-mono text-xs">
+                    ${ev.hashes.sha256 ? ev.hashes.sha256.substring(0, 16) + "..." : '<span class="badge badge-warning">Pending</span>'}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    async function ingestEvidence() {
+        const filename = document.getElementById('importFilename').value;
+        if (!filename) return alert("Enter a filename");
+        const res = await apiFetch(`/api/cases/${CASE_ID}/evidence`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename })
+        });
+        if (res.ok) { document.getElementById('importFilename').value = ''; loadEvidence(); }
+        else alert('Ingest failed');
+    }
+
+    // --- JOBS ---
+    async function loadJobs() {
+        const res = await apiFetch(`/api/cases/${CASE_ID}/jobs`);
+        const tbody = document.querySelector('#jobsTable tbody');
+        if (!res.ok) return;
+
+        const items = await res.json();
+        if (items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No jobs run yet.</td></tr>';
+            return;
+        }
+
+        function artifactUrl(p) {
+            const parts = String(p).split('/').map(encodeURIComponent).join('/');
+            return `/api/artifacts/${CASE_ID}/${parts}`;
+        }
+
+        tbody.innerHTML = items.map(job => {
+            let statusBadge = `<span class="badge badge-info">${job.status}</span>`;
+            if (job.status === 'COMPLETED') statusBadge = `<span class="badge badge-success">Completed</span>`;
+            if (job.status === 'FAILED') statusBadge = `<span class="badge badge-danger">Failed</span>`;
+            if (job.status === 'RUNNING') statusBadge = `<span class="badge badge-warning">Running</span>`;
+
+            let actions = '<span class="text-muted text-sm">-</span>';
+            if (job.output_files && job.output_files.length > 0) {
+                actions = job.output_files.map(p =>
+                    `<a href="${artifactUrl(p)}" target="_blank" class="text-sm">Download</a>`
+                ).join('<br>');
+            } else if (job.status === 'FAILED') {
+                actions = `<span class="text-danger text-sm" title="${job.error || 'Unknown Error'}">Failed</span>`;
+            }
+
+            actions = `<a class="text-sm" href="/web/jobs/${job.id}">View Job</a><br>` + actions;
+
+            return `
+                <tr>
+                    <td style="font-weight:500;">${job.module}</td>
+                    <td>${statusBadge}</td>
+                    <td class="text-sm text-muted">${new Date(job.created_at).toLocaleString()}</td>
+                    <td>${actions}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function runJob() {
+        const module = document.getElementById('moduleSelect').value;
+        const evidenceId = document.getElementById('targetEvidenceId').value;
+        if (!module || !evidenceId) return alert('Select module and Enter Evidence ID');
+
+        const res = await apiFetch(`/api/cases/${CASE_ID}/jobs`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module, evidence_id: evidenceId })
+        });
+        if (res.ok) { loadJobs(); switchTab('jobs'); } // Auto switch to jobs to see progress
+        else alert('Run failed');
+    }
+
+    // --- IOCS ---
+    async function loadIOCs() {
+        const res = await apiFetch(`/api/cases/${CASE_ID}/iocs/`);
+        const tbody = document.getElementById('iocList');
+        if (!res.ok) return;
+        const iocs = await res.json();
+
+        if (iocs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No IOCs.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = iocs.map(i => `
+            <tr>
+                <td><span class="badge badge-info">${i.type}</span></td>
+                <td class="text-mono text-sm">${i.value}</td>
+                <td class="text-sm">${i.confidence}</td>
+                <td class="text-sm text-muted">${new Date(i.created_at).toLocaleDateString()}</td>
+            </tr>
+        `).join('');
+    }
+
+    async function loadMatches() {
+        const res = await apiFetch(`/api/cases/${CASE_ID}/iocs/matches`);
+        const div = document.getElementById('findingsList');
+        if (!res.ok) return;
+        const matches = await res.json();
+
+        if (matches.length === 0) {
+            div.innerHTML = '<div class="text-muted text-center p-4">No system findings yet.</div>';
+            return;
+        }
+
+        div.innerHTML = matches.map(m => `
+            <div class="card" style="margin-bottom:0.5rem; padding:1rem; border-left:4px solid var(--danger);">
+                <div class="flex between">
+                    <strong>Match: ${m.ioc_value}</strong>
+                    <span class="badge badge-danger">IOC HIT</span>
+                </div>
+                <div class="text-sm mt-1">Found in: <span class="text-mono">${m.evidence_id || '?'}</span></div>
+                 <div class="text-xs text-muted mt-1">${new Date(m.created_at).toLocaleString()}</div>
+            </div>
+        `).join('');
+    }
+
+    async function addIOC() {
+        const type = document.getElementById('iocType').value;
+        const value = document.getElementById('iocValue').value;
+        if (!value) return;
+        await apiFetch(`/api/cases/${CASE_ID}/iocs/`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, value, confidence: 'high' })
+        });
+        document.getElementById('iocValue').value = '';
+        loadIOCs();
+    }
+
+    // Init
+    loadData();
+    // Poll Jobs
+    setInterval(() => {
+        if (document.getElementById('jobs').classList.contains('active')) loadJobs();
+    }, 5000);
+
+</script>
+{% endblock %}

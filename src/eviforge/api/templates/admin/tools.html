@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tools Health - EviForge Admin</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 0;
+            background: #f4f4f9;
+        }
+
+        header {
+            background: #c0392b;
+            color: white;
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header a {
+            color: white;
+            text-decoration: none;
+            margin-left: 1rem;
+            font-weight: bold;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        .card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: #f8f9fa;
+        }
+
+        .status-ok {
+            color: green;
+            font-weight: bold;
+        }
+
+        .status-fail {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div>EviForge Admin - Tools Doctor</div>
+        <nav>
+            <a href="/web/admin/dashboard">Dashboard</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>Forensic Toolchain Status</h2>
+            <p>Verifying all required binaries and services in the worker container.</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool / Service</th>
+                        <th>Status</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="toolsList">
+                    <tr>
+                        <td colspan="3">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('eviforge_token');
+        if (!token) window.location.href = '/web/admin/login';
+
+        function logout() {
+            localStorage.removeItem('eviforge_token');
+            window.location.href = '/web/admin/login';
+        }
+
+        async function loadTools() {
+            try {
+                // Call public health endpoint (or protected if we change it)
+                const res = await fetch('/health/tools');
+                const data = await res.json();
+
+                const tbody = document.getElementById('toolsList');
+                if (!data.details || !data.details.checks) {
+                    tbody.innerHTML = '<tr><td colspan="3">No detailed checks returned.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.details.checks.map(c => `
+                    <tr>
+                        <td style="font-family:monospace">${c.name}</td>
+                        <td class="${c.ok ? 'status-ok' : 'status-fail'}">${c.ok ? 'OK' : 'FAIL'}</td>
+                        <td>${c.details}</td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                document.getElementById('toolsList').innerHTML = `<tr><td colspan="3" style="color:red">Failed to load health report. API might be down.</td></tr>`;
+            }
+        }
+
+        loadTools();
+    </script>
+</body>
+
+</html>
