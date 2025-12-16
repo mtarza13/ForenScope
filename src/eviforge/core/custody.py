@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
 import json
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from eviforge.core.models import ChainOfCustody
 from eviforge.core.db import utcnow
+from eviforge.core.models import ChainOfCustody
 
 
 def calculate_entry_hash(
@@ -63,3 +66,106 @@ def log_action(
     
     session.add(entry)
     return entry
+
+
+# --- File-based custody log (vault/<case_id>/chain_of_custody.log) ---
+
+
+def _canonical_json(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class CustodyEntry:
+    ts: str
+    actor: str
+    action: str
+    details: dict[str, Any]
+    prev_hash: str
+    entry_hash: str
+
+
+GENESIS_HASH = "0" * 64
+
+
+def compute_entry_hash(payload: dict[str, Any]) -> str:
+    return sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def iter_entries(log_path: Path) -> Iterable[CustodyEntry]:
+    if not log_path.exists():
+        return
+    with log_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            yield CustodyEntry(
+                ts=obj["ts"],
+                actor=obj["actor"],
+                action=obj["action"],
+                details=obj.get("details", {}),
+                prev_hash=obj["prev_hash"],
+                entry_hash=obj["entry_hash"],
+            )
+
+
+def last_entry_hash(log_path: Path) -> str | None:
+    if not log_path.exists():
+        return None
+    last = None
+    for last in iter_entries(log_path):
+        pass
+    return None if last is None else last.entry_hash
+
+
+def append_entry(log_path: Path, *, actor: str, action: str, details: dict[str, Any]) -> CustodyEntry:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    prev_hash = last_entry_hash(log_path) or GENESIS_HASH
+
+    payload = {
+        "ts": _utc_now_iso(),
+        "actor": actor,
+        "action": action,
+        "details": details,
+        "prev_hash": prev_hash,
+    }
+    entry_hash = compute_entry_hash(payload)
+    record = {**payload, "entry_hash": entry_hash}
+
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(_canonical_json(record) + "\n")
+
+    return CustodyEntry(
+        ts=payload["ts"],
+        actor=actor,
+        action=action,
+        details=details,
+        prev_hash=prev_hash,
+        entry_hash=entry_hash,
+    )
+
+
+def verify_chain(log_path: Path) -> tuple[bool, str]:
+    prev = GENESIS_HASH
+    index = 0
+    for index, entry in enumerate(iter_entries(log_path), start=1):
+        if entry.prev_hash != prev:
+            return False, f"prev_hash mismatch at entry {index}"
+        payload = {
+            "ts": entry.ts,
+            "actor": entry.actor,
+            "action": entry.action,
+            "details": entry.details,
+            "prev_hash": entry.prev_hash,
+        }
+        expected = compute_entry_hash(payload)
+        if entry.entry_hash != expected:
+            return False, f"entry_hash mismatch at entry {index}"
+        prev = entry.entry_hash
+    return True, f"ok ({index} entries)"

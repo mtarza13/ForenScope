@@ -19,13 +19,18 @@ def enqueue_job(
     settings: Settings,
     case_id: str,
     tool_name: str,
-    params: dict[str, Any] = None
+    params: dict[str, Any] | None = None
 ) -> Job:
     """
     Create a Job record and enqueue it in Redis.
     """
     if params is None:
         params = {}
+    
+    # Ensure case_id is available to the module
+    params["case_id"] = case_id
+
+    evidence_id = params.get("evidence_id")
 
     job_id = str(uuid.uuid4())
     
@@ -33,9 +38,12 @@ def enqueue_job(
     job = Job(
         id=job_id,
         case_id=case_id,
+        evidence_id=evidence_id,
         tool_name=tool_name,
         status=JobStatus.PENDING,
-        created_at=utcnow()
+        queued_at=utcnow(),
+        created_at=utcnow(),
+        params_json=json.dumps(params, sort_keys=True),
     )
     session.add(job)
     session.flush() # Ensure ID is reserved
@@ -48,13 +56,13 @@ def enqueue_job(
     
     # We enqueue 'eviforge.worker.execute_module_task'
     # This function must be importable by the worker
-    q.enqueue(
+    rq_job = q.enqueue(
         "eviforge.worker.execute_module_task",
-        job_id=job_id,
-        tool_name=tool_name,
-        params=params, 
-        job_timeout="1h"
+        job_id,
+        job_timeout="1h",
     )
+
+    job.rq_job_id = rq_job.id
     
     return job
 

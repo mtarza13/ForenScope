@@ -55,6 +55,12 @@ def ingest_file(
     
     # 2. Copy file (read-only destination ideally, but fs permissions later)
     shutil.copy2(source_path, dest_path)
+
+    # Best-effort: mark destination read-only to discourage accidental edits.
+    try:
+        dest_path.chmod(0o444)
+    except Exception:
+        pass
     
     # 3. Verify copy
     dest_md5, dest_sha256 = calculate_hashes(dest_path)
