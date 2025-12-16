@@ -1,0 +1,21 @@
+site_name: EviForge
+site_url: ""
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue
+    accent: light blue
+  features:
+    - navigation.instant
+    - navigation.expand
+nav:
+  - Home: index.md
+  - Concepts: concepts.md
+  - Modules: modules.md
+  - API Reference: api.md
+  - Security Guidelines: security.md
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences

@@ -1,8 +1,24 @@
 services:
+  caddy:
+    image: caddy:2
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./site:/site
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
   api:
+    image: ghcr.io/forenscope/api:latest
     build:
       context: .
       dockerfile: docker/api.Dockerfile
+    restart: always
     environment:
       EVIFORGE_DATABASE_URL: postgresql+psycopg://eviforge:eviforge@db:5432/eviforge
       EVIFORGE_REDIS_URL: redis://redis:6379/0
@@ -10,11 +26,8 @@ services:
       EVIFORGE_VAULT_DIR: /data/cases
       EVIFORGE_BIND_HOST: 0.0.0.0
       EVIFORGE_BIND_PORT: "8000"
-    ports:
-      - "127.0.0.1:8000:8000"
     volumes:
-      - ./src:/app/src
-      - ./cases:/data/cases
+      - evidence_data:/data/cases
       - ./import:/import:ro
     depends_on:
       db:
@@ -23,17 +36,18 @@ services:
         condition: service_healthy
 
   worker:
+    image: ghcr.io/forenscope/worker:latest
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
+    restart: always
     environment:
       EVIFORGE_DATABASE_URL: postgresql+psycopg://eviforge:eviforge@db:5432/eviforge
       EVIFORGE_REDIS_URL: redis://redis:6379/0
       EVIFORGE_DATA_DIR: /data/misc
       EVIFORGE_VAULT_DIR: /data/cases
     volumes:
-      - ./src:/app/src
-      - ./cases:/data/cases
+      - evidence_data:/data/cases
       - ./import:/import:ro
     depends_on:
       db:
@@ -43,14 +57,13 @@ services:
 
   db:
     image: postgres:16
+    restart: always
     environment:
       POSTGRES_DB: eviforge
       POSTGRES_USER: eviforge
-      POSTGRES_PASSWORD: eviforge
+      POSTGRES_PASSWORD: eviforge # CHANGE THIS IN PROD!
     volumes:
-      - eviforge_db:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
+      - db_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U eviforge -d eviforge" ]
       interval: 5s
@@ -59,8 +72,9 @@ services:
 
   redis:
     image: redis:7
-    ports:
-      - "127.0.0.1:6379:6379"
+    restart: always
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -69,9 +83,11 @@ services:
 
   tika:
     image: apache/tika:latest
-    ports:
-      - "127.0.0.1:9998:9998"
-    restart: unless-stopped
+    restart: always
 
 volumes:
-  eviforge_db:
+  db_data:
+  redis_data:
+  evidence_data:
+  caddy_data:
+  caddy_config:

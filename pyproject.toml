@@ -15,14 +15,23 @@ dependencies = [
 	"typer>=0.12",
 	"rich>=13.7",
 	"SQLAlchemy>=2.0",
+	"Jinja2>=3.1",
 	"redis>=5.0",
 	"rq>=1.16",
+	"requests>=2.31",
+	"python-jose[cryptography]",
+	"passlib>=1.7.4",
+    "python-multipart",
+	"python-evtx>=0.6.1",
+	"python-registry>=1.3.1",
+	"yara-python>=4.3.1",
+	"pyshark>=0.6",
 ]
 
 [project.optional-dependencies]
 html = ["Jinja2>=3.1"]
 postgres = ["psycopg[binary]>=3.2"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "mkdocs-material>=9.5"]
 
 [project.scripts]
 eviforge = "eviforge.cli:main"
@@ -37,3 +46,51 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# Internal revision 5
+
+# Internal revision 7
+
+# Internal revision 8
+
+# Internal revision 16
+
+# Internal revision 18
+
+# Internal revision 25
+
+# Internal revision 31
+
+# Internal revision 41
+
+# Internal revision 42
+
+# Internal revision 43
+
+# Internal revision 44
+
+# Internal revision 45
+
+# Internal revision 48
+
+# Internal revision 51
+
+# Internal revision 55
+
+# Internal revision 57
+
+# Internal revision 60
+
+# Internal revision 61
+
+# Internal revision 65
+
+# Internal revision 68
+
+# Internal revision 71
+
+# Internal revision 72
+
+# Internal revision 76
+
+# Internal revision 80

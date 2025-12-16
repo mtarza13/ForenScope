@@ -1,21 +1,21 @@
 services:
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     environment:
       EVIFORGE_DATABASE_URL: postgresql+psycopg://eviforge:eviforge@db:5432/eviforge
       EVIFORGE_REDIS_URL: redis://redis:6379/0
-      EVIFORGE_DATA_DIR: /data
-      EVIFORGE_VAULT_DIR: /vault
+      EVIFORGE_DATA_DIR: /data/misc
+      EVIFORGE_VAULT_DIR: /data/cases
       EVIFORGE_BIND_HOST: 0.0.0.0
       EVIFORGE_BIND_PORT: "8000"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - eviforge_vault:/vault
-      - eviforge_data:/data
-      - ./../import:/import:ro
+      - ./src:/app/src
+      - ./cases:/data/cases
+      - ./import:/import:ro
     depends_on:
       db:
         condition: service_healthy
@@ -24,17 +24,17 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/worker.Dockerfile
     environment:
       EVIFORGE_DATABASE_URL: postgresql+psycopg://eviforge:eviforge@db:5432/eviforge
       EVIFORGE_REDIS_URL: redis://redis:6379/0
-      EVIFORGE_DATA_DIR: /data
-      EVIFORGE_VAULT_DIR: /vault
+      EVIFORGE_DATA_DIR: /data/misc
+      EVIFORGE_VAULT_DIR: /data/cases
     volumes:
-      - eviforge_vault:/vault
-      - eviforge_data:/data
-      - ./../import:/import:ro
+      - ./src:/app/src
+      - ./cases:/data/cases
+      - ./import:/import:ro
     depends_on:
       db:
         condition: service_healthy
@@ -52,7 +52,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U eviforge -d eviforge"]
+      test: [ "CMD-SHELL", "pg_isready -U eviforge -d eviforge" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -62,12 +62,16 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  tika:
+    image: apache/tika:latest
+    ports:
+      - "127.0.0.1:9998:9998"
+    restart: unless-stopped
+
 volumes:
   eviforge_db:
-  eviforge_vault:
-  eviforge_data:

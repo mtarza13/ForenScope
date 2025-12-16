@@ -1,0 +1,38 @@
+{
+    email admin@example.com
+}
+
+:80, {$DOMAIN_NAME:localhost} {
+    # 1. API (including Swagger at /api/docs -> /docs)
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+
+    # 2. Documentation Site
+    handle_path /docs/* {
+        root * /site
+        file_server
+    }
+
+    # 3. Web UI (Dashboard)
+    handle_path /web/* {
+        reverse_proxy api:8000
+    }
+
+    # Default Redirect to Dashboard
+    handle / {
+        redir /web/ 302
+    }
+    
+    # Static files (if needed by UI)
+    handle_path /static/* {
+         reverse_proxy api:8000
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
