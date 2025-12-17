@@ -18,6 +18,7 @@
     <div class="tabs">
         <div class="tab-btn active" onclick="switchTab('evidence')">Evidence Vault</div>
         <div class="tab-btn" onclick="switchTab('jobs')">Jobs & Modules</div>
+        <div class="tab-btn" onclick="switchTab('artifacts')">Artifacts</div>
         <div class="tab-btn" onclick="switchTab('iocs')">IOCs & Findings</div>
     </div>
 
@@ -26,9 +27,15 @@
         <div class="card">
             <div class="flex between mb-4">
                 <h3>Evidence Items</h3>
-                <div class="flex">
-                    <input type="text" id="importFilename" placeholder="File in /import (e.g. disk.img)">
-                    <button onclick="ingestEvidence()" class="btn btn-primary">Ingest</button>
+                <div class="flex" style="flex-wrap: wrap; justify-content: flex-end;">
+                    <div class="flex" style="gap:0.5rem;">
+                        <input type="text" id="importFilename" placeholder="File in /import (e.g. disk.img)">
+                        <button onclick="ingestEvidence()" class="btn btn-primary">Ingest</button>
+                    </div>
+                    <form id="uploadForm" class="flex" style="gap:0.5rem;" onsubmit="uploadEvidence(event)">
+                        <input type="file" id="uploadFile" required>
+                        <button type="submit" class="btn btn-outline">Upload</button>
+                    </form>
                 </div>
             </div>
 
@@ -40,11 +47,12 @@
                         <th>Size</th>
                         <th>Ingested</th>
                         <th>Integrity (SHA256)</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td colspan="5" class="text-muted text-center">Loading evidence...</td>
+                        <td colspan="6" class="text-muted text-center">Loading evidence...</td>
                     </tr>
                 </tbody>
             </table>
@@ -76,7 +84,10 @@
                         <option value="bulk">Bulk Extractor</option>
                         <option value="carve">Carve (foremost)</option>
                     </select>
-                    <input type="text" id="targetEvidenceId" placeholder="Evidence UUID">
+                    <select id="targetEvidenceId" title="Evidence item">
+                        <option value="" selected>No evidence loaded</option>
+                    </select>
+                    <input type="text" id="jobParams" placeholder='Params JSON (optional)' style="min-width:220px;">
                     <button onclick="runJob()" class="btn btn-primary">Run Module</button>
                 </div>
             </div>
@@ -96,6 +107,33 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- ARTIFACTS TAB -->
+    <div id="artifacts" class="tab-content">
+        <div class="card">
+            <div class="flex between mb-4">
+                <div>
+                    <h3>Artifacts Browser</h3>
+                    <div class="text-muted text-sm">Browse module outputs under the case vault (read-only).</div>
+                </div>
+                <div class="flex" style="gap:0.5rem;">
+                    <button class="btn btn-sm btn-outline" type="button" onclick="artifactsUp()">Up</button>
+                    <span class="badge badge-info text-mono" id="artifactsPath">/</span>
+                </div>
+            </div>
+
+            <div class="artifact-browser">
+                <div class="artifact-tree">
+                    <div class="text-muted text-sm mb-2">Folders / Files</div>
+                    <div id="artifactTree" class="artifact-list">Loading…</div>
+                </div>
+                <div class="artifact-preview">
+                    <div class="text-muted text-sm mb-2">Preview</div>
+                    <div id="artifactPreview" class="pre-block">Select a file to preview.</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -152,6 +190,22 @@
 {% block scripts %}
 <script>
     const CASE_ID = "{{ case_id }}";
+    let EVIDENCE_ITEMS = [];
+    let CURRENT_ARTIFACTS_PATH = "";
+    const MODULE_REQUIRES_EVIDENCE = new Set([
+        "inventory", "strings", "timeline", "parse_text", "exif", "triage", "verify",
+        "pcap", "browser", "email", "evtx", "registry", "yara", "bulk", "carve",
+    ]);
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[c]));
+    }
 
     // Tab Logic
     function switchTab(tabId) {
@@ -168,6 +222,7 @@
         // Lazy Load
         if (tabId === 'evidence') loadEvidence();
         if (tabId === 'jobs') loadJobs();
+        if (tabId === 'artifacts') loadArtifacts();
         if (tabId === 'iocs') { loadIOCs(); loadMatches(); }
     }
 
@@ -192,19 +247,24 @@
         if (!res.ok) return;
 
         const items = await res.json();
+        EVIDENCE_ITEMS = items;
+        refreshEvidenceSelect(items);
         if (items.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No evidence ingested yet.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No evidence ingested yet.</td></tr>';
             return;
         }
 
         tbody.innerHTML = items.map(ev => `
             <tr>
                 <td class="text-mono text-sm text-muted">${ev.id.substring(0, 8)}</td>
-                <td style="font-weight:500;">${ev.filename}</td>
+                <td style="font-weight:500;">${escapeHtml(ev.filename)}</td>
                 <td class="text-sm">${(ev.size / 1024).toFixed(2)} KB</td>
                 <td class="text-sm text-muted">${new Date(ev.ingested_at).toLocaleString()}</td>
                 <td class="text-mono text-xs">
                     ${ev.hashes.sha256 ? ev.hashes.sha256.substring(0, 16) + "..." : '<span class="badge badge-warning">Pending</span>'}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="copyText('${ev.id}')">Copy ID</button>
                 </td>
             </tr>
         `).join('');
@@ -219,6 +279,29 @@
         });
         if (res.ok) { document.getElementById('importFilename').value = ''; loadEvidence(); }
         else alert('Ingest failed');
+    }
+
+    async function uploadEvidence(e) {
+        e.preventDefault();
+        const fileInput = document.getElementById('uploadFile');
+        if (!fileInput.files || !fileInput.files.length) return;
+        const fd = new FormData();
+        fd.append('file', fileInput.files[0]);
+        const res = await apiFetch(`/api/cases/${CASE_ID}/evidence/upload`, { method: 'POST', body: fd });
+        if (res.ok) { fileInput.value = ''; loadEvidence(); }
+        else alert('Upload failed');
+    }
+
+    function refreshEvidenceSelect(items) {
+        const sel = document.getElementById('targetEvidenceId');
+        if (!sel) return;
+        if (!items || items.length === 0) {
+            sel.innerHTML = '<option value="" selected>No evidence loaded</option>';
+            return;
+        }
+        sel.innerHTML = ['<option value="" selected>Select evidence…</option>'].concat(
+            items.map(ev => `<option value="${ev.id}">${ev.filename} (${ev.id.substring(0, 8)})</option>`)
+        ).join('');
     }
 
     // --- JOBS ---
@@ -250,7 +333,7 @@
                     `<a href="${artifactUrl(p)}" target="_blank" class="text-sm">Download</a>`
                 ).join('<br>');
             } else if (job.status === 'FAILED') {
-                actions = `<span class="text-danger text-sm" title="${job.error || 'Unknown Error'}">Failed</span>`;
+                actions = `<span class="text-danger text-sm" title="${escapeHtml(job.error || 'Unknown Error')}">Failed</span>`;
             }
 
             actions = `<a class="text-sm" href="/web/jobs/${job.id}">View Job</a><br>` + actions;
@@ -269,15 +352,115 @@
     async function runJob() {
         const module = document.getElementById('moduleSelect').value;
         const evidenceId = document.getElementById('targetEvidenceId').value;
+        const paramsRaw = (document.getElementById('jobParams')?.value || '').trim();
         if (!module) return alert('Select module');
-        if (!evidenceId && module !== 'report') return alert('Enter Evidence ID (required for this module)');
+        if (MODULE_REQUIRES_EVIDENCE.has(module) && !evidenceId) return alert('Select evidence (required for this module)');
+
+        let params = {};
+        if (paramsRaw) {
+            try { params = JSON.parse(paramsRaw); }
+            catch { return alert('Params JSON is invalid'); }
+        }
 
         const res = await apiFetch(`/api/cases/${CASE_ID}/jobs`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module, evidence_id: evidenceId || null })
+            body: JSON.stringify({ module, evidence_id: evidenceId || null, params })
         });
         if (res.ok) { loadJobs(); switchTab('jobs'); } // Auto switch to jobs to see progress
         else alert('Run failed');
+    }
+
+    document.getElementById('moduleSelect')?.addEventListener('change', () => {
+        const module = document.getElementById('moduleSelect').value;
+        const evSel = document.getElementById('targetEvidenceId');
+        if (!evSel) return;
+        evSel.disabled = !MODULE_REQUIRES_EVIDENCE.has(module);
+    });
+
+    // --- ARTIFACTS ---
+    function setArtifactsPath(p) {
+        CURRENT_ARTIFACTS_PATH = p || "";
+        const badge = document.getElementById('artifactsPath');
+        if (badge) badge.textContent = CURRENT_ARTIFACTS_PATH ? `/${CURRENT_ARTIFACTS_PATH}` : '/';
+    }
+
+    async function loadArtifacts(path = CURRENT_ARTIFACTS_PATH) {
+        setArtifactsPath(path);
+        const tree = document.getElementById('artifactTree');
+        if (!tree) return;
+        tree.textContent = 'Loading…';
+        const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+        const res = await apiFetch(`/api/cases/${CASE_ID}/artifacts/tree${qs}`);
+        if (!res.ok) { tree.textContent = `Failed to load (${res.status})`; return; }
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) { tree.innerHTML = '<div class="text-muted text-sm">Empty folder.</div>'; return; }
+
+        tree.innerHTML = '';
+        for (const it of items) {
+            const row = document.createElement('div');
+            row.className = 'artifact-item';
+
+            const icon = document.createElement('span');
+            icon.className = 'artifact-icon text-mono';
+            icon.textContent = (it.type === 'dir') ? '[DIR]' : '[FILE]';
+
+            const name = document.createElement('span');
+            name.textContent = ` ${it.name}`;
+
+            row.appendChild(icon);
+            row.appendChild(name);
+
+            row.addEventListener('click', () => {
+                if (it.type === 'dir') openArtifactDir(it.path);
+                else openArtifactFile(it.path);
+            });
+
+            tree.appendChild(row);
+        }
+    }
+
+    function openArtifactDir(p) {
+        loadArtifacts(p);
+    }
+
+    async function openArtifactFile(p) {
+        const pre = document.getElementById('artifactPreview');
+        if (!pre) return;
+        pre.textContent = 'Loading…';
+        const res = await apiFetch(`/api/cases/${CASE_ID}/artifacts/file?path=${encodeURIComponent(p)}`);
+        if (!res.ok) { pre.textContent = `Failed to preview (${res.status})`; return; }
+        const data = await res.json();
+        if (data.kind === 'json' || data.kind === 'jsonl') {
+            pre.textContent = JSON.stringify(data.data, null, 2);
+        } else if (data.kind === 'csv') {
+            pre.textContent = (data.rows || []).map(r => r.join(',')).join('\n');
+        } else if (data.kind === 'binary' || data.kind === 'too_large') {
+            pre.innerHTML = `<div class="text-muted">Preview unavailable (${escapeHtml(data.kind)}).</div><div class="mt-1"><a href="${escapeHtml(data.download_url)}" target="_blank">Download</a></div>`;
+        } else {
+            pre.textContent = data.text || '';
+        }
+    }
+
+    function artifactsUp() {
+        if (!CURRENT_ARTIFACTS_PATH) return loadArtifacts('');
+        const parts = CURRENT_ARTIFACTS_PATH.split('/').filter(Boolean);
+        parts.pop();
+        loadArtifacts(parts.join('/'));
+    }
+
+    function copyText(s) {
+        try {
+            navigator.clipboard.writeText(s);
+        } catch {
+            // fallback
+            const ta = document.createElement('textarea');
+            ta.value = s;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
     }
 
     // --- IOCS ---

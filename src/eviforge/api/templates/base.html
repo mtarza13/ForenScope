@@ -10,32 +10,44 @@
 </head>
 
 <body>
-    <div class="layout-grid">
-        <header>
-            <div class="flex">
-                <h1>EviForge</h1>
-                <nav>
-                    <a href="/web" class="{% if request.url.path == '/web' %}active{% endif %}">Dashboard</a>
-                    <a href="/web/admin" class="{% if '/admin' in request.url.path %}active{% endif %}">Admin</a>
-                    <a href="/web/osint" class="{% if '/osint' in request.url.path %}active{% endif %}">OSINT &amp; Privacy</a>
-                </nav>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <a href="/web" class="brand-link">EviForge</a>
+                <div class="text-muted text-xs">Local-first DFIR console</div>
             </div>
-            <div class="user-menu">
-                <button class="btn btn-sm btn-outline" id="themeToggle" type="button">Theme</button>
-                <a class="btn btn-sm btn-outline" href="/web/login" id="loginLink">Login</a>
-                <button class="btn btn-sm btn-outline" id="logoutBtn" type="button" style="display:none;">Logout</button>
+            <nav class="sidebar-nav">
+                <a href="/web" class="{% if request.url.path == '/web' or request.url.path.startswith('/web/cases') or request.url.path.startswith('/web/jobs') %}active{% endif %}">Cases</a>
+                <a href="/web/osint" class="{% if '/osint' in request.url.path %}active{% endif %}">OSINT &amp; Privacy</a>
+                <a href="/web/admin" class="{% if '/admin' in request.url.path %}active{% endif %}">Admin</a>
+            </nav>
+            <div class="sidebar-footer text-xs text-muted">
+                <div>Offline-first • No telemetry</div>
             </div>
-        </header>
+        </aside>
 
-        <main>
-            <div class="container">
-                {% block content %}{% endblock %}
-            </div>
-        </main>
+        <div class="main-column">
+            <header class="topbar">
+                <div class="topbar-title">
+                    <h1>EviForge</h1>
+                </div>
+                <div class="user-menu">
+                    <button class="btn btn-sm btn-outline" id="themeToggle" type="button">Theme</button>
+                    <a class="btn btn-sm btn-outline" href="/web/login" id="loginLink">Login</a>
+                    <button class="btn btn-sm btn-outline" id="logoutBtn" type="button" style="display:none;">Logout</button>
+                </div>
+            </header>
 
-        <footer style="text-align:center; padding: 1rem; color: #7f8c8d; font-size: 0.8rem;">
-            EviForge Community Edition &bull; Local-First DFIR
-        </footer>
+            <main>
+                <div class="container">
+                    {% block content %}{% endblock %}
+                </div>
+            </main>
+
+            <footer style="text-align:center; padding: 1rem; color: #7f8c8d; font-size: 0.8rem;">
+                EviForge Community Edition &bull; Local-First DFIR
+            </footer>
+        </div>
     </div>
 
     <script>
