@@ -29,14 +29,14 @@
       <!-- Tabs -->
       <div class="mb-4">
         <button class="btn btn-sm btn-primary" onclick="showTab('system')">System Health</button>
-        <button class="btn btn-sm btn-secondary" onclick="showTab('audit')">Audit Log</button>
+        <button class="btn btn-sm btn-outline" onclick="showTab('audit')">Audit Log</button>
       </div>
 
       <!-- System Tab -->
       <div id="tab-system">
         <div class="card mb-4">
           <h3>Authorization Status</h3>
-          <p>Required Text: <code class="text-sm bg-gray-100 p-1">{{ ack_required }}</code></p>
+          <p>Required Text: <code class="text-sm">{{ ack_required }}</code></p>
           {% if not acknowledged %}
           <div class="mt-2">
             <button class="btn btn-primary" onclick="submitAck()">Is Authorized & Acknowledge</button>
@@ -118,30 +118,91 @@
     </div>
 
     <!-- Config -->
-    <div class="card">
-      <h3>Configuration</h3>
-      <table class="mt-2">
-        <tr>
-          <th>Key</th>
-          <th>Value</th>
-        </tr>
-        <tr>
-          <td>Data Dir</td>
-          <td><code class="text-sm">{{ data_dir }}</code></td>
-        </tr>
-        <tr>
-          <td>Vault Dir</td>
-          <td><code class="text-sm">{{ vault_dir }}</code></td>
-        </tr>
-        <tr>
-          <td>DB Host</td>
-          <td><code class="text-sm">{{ database_url }}</code></td>
-        </tr>
-        <tr>
-          <td>Redis Host</td>
-          <td><code class="text-sm">{{ redis_url }}</code></td>
-        </tr>
-      </table>
+    <div>
+      <div class="card">
+        <h3>Configuration</h3>
+        <table class="mt-2">
+          <tr>
+            <th>Key</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Data Dir</td>
+            <td><code class="text-sm">{{ data_dir }}</code></td>
+          </tr>
+          <tr>
+            <td>Vault Dir</td>
+            <td><code class="text-sm">{{ vault_dir }}</code></td>
+          </tr>
+          <tr>
+            <td>DB</td>
+            <td><code class="text-sm">{{ database_url }}</code></td>
+          </tr>
+          <tr>
+            <td>Redis</td>
+            <td><code class="text-sm">{{ redis_url }}</code></td>
+          </tr>
+        </table>
+        <div class="text-muted text-xs mt-2">Tip: set `EVIFORGE_ADMIN_PASSWORD` on first run to bootstrap an admin user.</div>
+      </div>
+
+      <div class="card">
+        <h3>User Management</h3>
+        <div class="text-muted text-sm">Admins can create analysts, reset passwords, and disable accounts.</div>
+
+        <div id="usersStatus" class="text-muted text-sm mt-2">Loading…</div>
+        <div style="overflow-x:auto;">
+          <table id="usersTable" class="mt-2">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h4 class="mt-2">Create User</h4>
+        <form id="createUserForm" class="mt-2">
+          <div class="flex" style="flex-wrap:wrap; gap:0.5rem;">
+            <input id="newUsername" placeholder="username" required>
+            <input id="newPassword" type="password" placeholder="password (min 12 chars)" required>
+            <select id="newRole">
+              <option value="analyst" selected>analyst</option>
+              <option value="admin">admin</option>
+            </select>
+            <button class="btn btn-primary" type="submit">Create</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Runtime Settings</h3>
+        <div class="text-muted text-sm">Stored in DB; env vars override when set.</div>
+        <div id="settingsStatus" class="text-muted text-sm mt-2">Loading…</div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;" class="mt-2">
+          <div>
+            <label class="text-sm font-bold text-muted">Max Upload Bytes</label>
+            <input type="number" id="settingMaxUpload" min="0" step="1" style="width:100%; box-sizing:border-box;">
+            <div class="text-xs text-muted mt-1">Controls `/evidence/upload`. For large evidence, use `/import` ingest.</div>
+          </div>
+          <div>
+            <label class="text-sm font-bold text-muted">Max Artifact Preview Bytes</label>
+            <input type="number" id="settingMaxPreview" min="0" step="1" style="width:100%; box-sizing:border-box;">
+            <div class="text-xs text-muted mt-1">Controls `/artifacts/file` preview size.</div>
+          </div>
+        </div>
+
+        <div class="mt-2 flex" style="justify-content:flex-end; gap:0.5rem;">
+          <button class="btn btn-outline" type="button" onclick="loadSettings()">Reload</button>
+          <button class="btn btn-primary" type="button" onclick="saveSettings()">Save</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -150,6 +211,16 @@
 {% block scripts %}
 <script type="application/json" id="ackRequiredJson">{{ ack_required|tojson }}</script>
 <script>
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[c]));
+  }
+
   function showTab(name) {
     document.getElementById('tab-system').style.display = name === 'system' ? 'block' : 'none';
     document.getElementById('tab-audit').style.display = name === 'audit' ? 'block' : 'none';
@@ -170,5 +241,142 @@
     el.textContent = 'Failed';
   }
 }
+
+async function loadUsers() {
+  const status = document.getElementById('usersStatus');
+  const tbody = document.querySelector('#usersTable tbody');
+  status.textContent = 'Loading…';
+  tbody.innerHTML = '';
+
+  const res = await apiFetch('/api/admin/users');
+  if (!res.ok) {
+    status.textContent = `Failed to load users (${res.status})`;
+    return;
+  }
+  const users = await res.json();
+  status.textContent = `${users.length} users`;
+
+  for (const u of users) {
+    const tr = document.createElement('tr');
+
+    const tdUser = document.createElement('td');
+    tdUser.textContent = u.username;
+    tr.appendChild(tdUser);
+
+    const tdRole = document.createElement('td');
+    const roleSel = document.createElement('select');
+    roleSel.innerHTML = `
+      <option value="analyst">analyst</option>
+      <option value="admin">admin</option>
+    `;
+    roleSel.value = u.role;
+    roleSel.addEventListener('change', async () => {
+      await apiFetch(`/api/admin/users/${encodeURIComponent(u.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: roleSel.value })
+      });
+      loadUsers();
+    });
+    tdRole.appendChild(roleSel);
+    tr.appendChild(tdRole);
+
+    const tdActive = document.createElement('td');
+    const activeBtn = document.createElement('button');
+    activeBtn.className = 'btn btn-sm btn-outline';
+    activeBtn.type = 'button';
+    activeBtn.textContent = u.is_active ? 'Enabled' : 'Disabled';
+    activeBtn.addEventListener('click', async () => {
+      await apiFetch(`/api/admin/users/${encodeURIComponent(u.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !u.is_active })
+      });
+      loadUsers();
+    });
+    tdActive.appendChild(activeBtn);
+    tr.appendChild(tdActive);
+
+    const tdCreated = document.createElement('td');
+    tdCreated.className = 'text-mono text-sm';
+    try { tdCreated.textContent = new Date(u.created_at).toLocaleString(); } catch { tdCreated.textContent = u.created_at; }
+    tr.appendChild(tdCreated);
+
+    const tdActions = document.createElement('td');
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn btn-sm btn-outline';
+    resetBtn.type = 'button';
+    resetBtn.textContent = 'Reset Password';
+    resetBtn.addEventListener('click', async () => {
+      const pw = prompt(`New password for ${u.username} (min 12 chars):`);
+      if (!pw) return;
+      const r = await apiFetch(`/api/admin/users/${encodeURIComponent(u.id)}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw })
+      });
+      if (!r.ok) alert('Reset failed');
+    });
+    tdActions.appendChild(resetBtn);
+    tr.appendChild(tdActions);
+
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('createUserForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = document.getElementById('newUsername').value;
+  const p = document.getElementById('newPassword').value;
+  const r = document.getElementById('newRole').value;
+  const res = await apiFetch('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u, password: p, role: r })
+  });
+  if (!res.ok) {
+    alert('Create user failed');
+    return;
+  }
+  document.getElementById('newUsername').value = '';
+  document.getElementById('newPassword').value = '';
+  loadUsers();
+});
+
+async function loadSettings() {
+  const status = document.getElementById('settingsStatus');
+  status.textContent = 'Loading…';
+  const res = await apiFetch('/api/admin/settings');
+  if (!res.ok) { status.textContent = `Failed to load (${res.status})`; return; }
+  const data = await res.json();
+  const values = data.values || {};
+
+  document.getElementById('settingMaxUpload').value = (values.max_upload_bytes ?? '');
+  document.getElementById('settingMaxPreview').value = (values.max_artifact_preview_bytes ?? '');
+  status.textContent = 'Loaded.';
+}
+
+async function saveSettings() {
+  const status = document.getElementById('settingsStatus');
+  status.textContent = 'Saving…';
+  const values = {};
+  const maxUpload = document.getElementById('settingMaxUpload').value;
+  const maxPreview = document.getElementById('settingMaxPreview').value;
+  if (maxUpload !== '') values.max_upload_bytes = parseInt(maxUpload, 10);
+  else values.max_upload_bytes = null;
+  if (maxPreview !== '') values.max_artifact_preview_bytes = parseInt(maxPreview, 10);
+  else values.max_artifact_preview_bytes = null;
+
+  const res = await apiFetch('/api/admin/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values })
+  });
+  if (!res.ok) { status.textContent = `Failed to save (${res.status})`; return; }
+  status.textContent = 'Saved.';
+}
+
+loadUsers();
+loadSettings();
 </script>
 {% endblock %}

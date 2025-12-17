@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from eviforge.config import load_settings
 from eviforge.core.auth import ack_dependency, get_current_active_user, User
 from eviforge.core.audit import audit_from_user
-from eviforge.core.db import create_session_factory
+from eviforge.core.db import create_session_factory, get_setting
 
 router = APIRouter(dependencies=[Depends(ack_dependency), Depends(get_current_active_user)])
 
@@ -154,7 +154,20 @@ def preview_artifact_file(
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    max_bytes = int(os.getenv("EVIFORGE_MAX_ARTIFACT_PREVIEW_BYTES", str(1024 * 1024)))  # 1 MiB
+    max_env = os.getenv("EVIFORGE_MAX_ARTIFACT_PREVIEW_BYTES")
+    max_bytes: int | None = int(max_env) if max_env else None
+    if max_bytes is None:
+        try:
+            settings = load_settings()
+            SessionLocal = create_session_factory(settings.database_url)
+            with SessionLocal() as s:
+                v = get_setting(s, "max_artifact_preview_bytes")
+            if isinstance(v, int) and v > 0:
+                max_bytes = v
+        except Exception:
+            max_bytes = None
+    if max_bytes is None:
+        max_bytes = 1024 * 1024  # 1 MiB
     size = target.stat().st_size
     download_url = f"/api/artifacts/{quote(case_id)}/{quote(rel)}"
 

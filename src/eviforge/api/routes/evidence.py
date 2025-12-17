@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from eviforge.core.auth import ack_dependency, get_current_active_user, require_roles, User
 from eviforge.config import load_settings
-from eviforge.core.db import create_session_factory
+from eviforge.core.db import create_session_factory, get_setting
 from eviforge.core.models import Case, Evidence
 from eviforge.core.ingest import ingest_file
 from eviforge.core.audit import audit_from_user
@@ -114,7 +114,18 @@ def upload_evidence(
     SessionLocal = create_session_factory(settings.database_url)
 
     # Uploads can be huge; encourage ingest from /import for very large files.
-    max_bytes = int(os.getenv("EVIFORGE_MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))  # 1 GiB default
+    max_env = os.getenv("EVIFORGE_MAX_UPLOAD_BYTES")
+    max_bytes: int | None = int(max_env) if max_env else None
+    if max_bytes is None:
+        try:
+            with SessionLocal() as s:
+                v = get_setting(s, "max_upload_bytes")
+            if isinstance(v, int) and v > 0:
+                max_bytes = v
+        except Exception:
+            max_bytes = None
+    if max_bytes is None:
+        max_bytes = 1024 * 1024 * 1024  # 1 GiB default
 
     safe_name = Path(file.filename or "").name
     if not safe_name:
