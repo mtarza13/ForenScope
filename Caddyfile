@@ -4,7 +4,7 @@
 
 :80, {$DOMAIN_NAME:localhost} {
     # 1. API (including Swagger at /api/docs -> /docs)
-    handle_path /api/* {
+    handle /api/* {
         reverse_proxy api:8000
     }
 
@@ -15,7 +15,7 @@
     }
 
     # 3. Web UI (Dashboard)
-    handle_path /web/* {
+    handle /web/* {
         reverse_proxy api:8000
     }
 
