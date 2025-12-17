@@ -26,9 +26,6 @@ def enqueue_job(
     """
     if params is None:
         params = {}
-    
-    # Ensure case_id is available to the module
-    params["case_id"] = case_id
 
     evidence_id = params.get("evidence_id")
 

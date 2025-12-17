@@ -20,8 +20,13 @@ class ForensicModule(ABC):
         """Human readable description."""
         pass
 
+    @property
+    def requires_evidence(self) -> bool:
+        """Whether this module requires an evidence_id (vs case-scoped)."""
+        return True
+
     @abstractmethod
-    def run(self, case_id: str, evidence_id: str, **kwargs) -> Dict[str, Any]:
+    def run(self, case_id: str, evidence_id: str | None, **kwargs) -> Dict[str, Any]:
         """
         Execute the module logic.
         Must return a dictionary of results (JSON serializable).

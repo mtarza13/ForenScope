@@ -1,5 +1,6 @@
 from typing import Any, Dict
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -36,19 +37,25 @@ class CarveModule(ForensicModule):
         output_subdir = artifact_dir / evidence_id
         output_subdir.mkdir(parents=True, exist_ok=True)
 
+        foremost = shutil.which("foremost")
+        if not foremost:
+            return {
+                "status": "skipped",
+                "reason": "foremost not found in PATH (integration not enabled)",
+                "how_to_enable": "Install foremost in the worker/tools container or on the host PATH.",
+            }
+
         try:
             # Foremost
             # foremost -i <input> -o <output>
             # -T timestamp the directory? No we want predictable path
             # It will create 'output_subdir/audit.txt'
             
-            cmd = ["foremost", "-i", str(file_path), "-o", str(output_subdir)]
-            subprocess.run(cmd, check=True, capture_output=True)
+            cmd = [foremost, "-i", str(file_path), "-o", str(output_subdir)]
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
             
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Foremost failed: {e.stderr}")
-        except FileNotFoundError:
-             raise RuntimeError("Foremost binary not found")
+            return {"status": "failed", "error": f"Foremost failed (exit={e.returncode})", "stderr": (e.stderr or "")[:2000]}
 
         # Summarize results
         # Foremost creates directories like jpg/, png/ inside output_subdir
@@ -62,6 +69,7 @@ class CarveModule(ForensicModule):
 
         summary = {
             "tool": "foremost",
+            "cmd": cmd,
             "total_recovered": total,
             "types": recovered_stats,
             "output_dir": str(output_subdir)

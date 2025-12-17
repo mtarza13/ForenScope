@@ -96,7 +96,7 @@ from typing import Any, Dict
 
 class JobSubmission(BaseModel):
     module: str
-    evidence_id: str
+    evidence_id: str | None = None
     params: Dict[str, Any] = {}
 
 @router.get("/{case_id}/jobs")
@@ -133,18 +133,53 @@ def create_case_job(request: Request, case_id: str, req: JobSubmission, _user=De
     settings = load_settings()
     SessionLocal = create_session_factory(settings.database_url)
     with SessionLocal() as session:
-        allowed = {"inventory", "strings", "timeline", "parse_text", "exif", "triage"}
-        if req.module not in allowed:
+        module_requires_evidence = {
+            "inventory": True,
+            "strings": True,
+            "timeline": True,
+            "parse_text": True,
+            "exif": True,
+            "triage": True,
+            "yara": True,
+            "pcap": True,
+            "evtx": True,
+            "registry": True,
+            "browser": True,
+            "email": True,
+            "bulk": True,
+            "carve": True,
+            "verify": True,
+            "report": False,
+        }
+        if req.module not in module_requires_evidence:
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Unsupported module")
+        if module_requires_evidence[req.module] and not req.evidence_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="evidence_id is required for this module")
 
         # Check case existence skipped for speed/robustness (worker handles) or added here
         params = req.params.copy()
-        params["evidence_id"] = req.evidence_id
+        if req.evidence_id:
+            params["evidence_id"] = req.evidence_id
+        params["actor"] = getattr(_user, "username", "api")
         
         try:
              job = enqueue_job(session, settings, case_id, req.module, params)
              session.commit()
+
+             # File-based custody chain (vault/<case_id>/chain_of_custody.log)
+             try:
+                 from eviforge.core.custody import append_entry
+
+                 append_entry(
+                     settings.vault_dir / case_id / "chain_of_custody.log",
+                     actor=params["actor"],
+                     action="job.enqueue",
+                     details={"job_id": job.id, "module": req.module, "evidence_id": req.evidence_id},
+                 )
+             except Exception:
+                 pass
 
              try:
                  audit_from_user(
@@ -170,6 +205,5 @@ def create_case_job(request: Request, case_id: str, req: JobSubmission, _user=De
         except Exception as e:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
-
 
 

@@ -37,6 +37,16 @@ def ensure_modules_registered() -> None:
     from eviforge.modules.parse_text import ParseTextModule
     from eviforge.modules.exif import ExifModule
     from eviforge.modules.triage import TriageModule
+    from eviforge.modules.yara import YaraModule
+    from eviforge.modules.pcap import PcapModule
+    from eviforge.modules.evtx import EvtxModule
+    from eviforge.modules.registry import RegistryModule
+    from eviforge.modules.browser import BrowserModule
+    from eviforge.modules.email import EmailModule
+    from eviforge.modules.bulk import BulkExtractorModule
+    from eviforge.modules.carve import CarveModule
+    from eviforge.modules.verification import VerifyModule
+    from eviforge.modules.reports import ReportModule
 
     register_module(InventoryModule)
     register_module(StringsModule)
@@ -44,6 +54,16 @@ def ensure_modules_registered() -> None:
     register_module(ParseTextModule)
     register_module(ExifModule)
     register_module(TriageModule)
+    register_module(YaraModule)
+    register_module(PcapModule)
+    register_module(EvtxModule)
+    register_module(RegistryModule)
+    register_module(BrowserModule)
+    register_module(EmailModule)
+    register_module(BulkExtractorModule)
+    register_module(CarveModule)
+    register_module(VerifyModule)
+    register_module(ReportModule)
 
 
 class _Timeout(Exception):
@@ -139,8 +159,9 @@ def execute_module_task(job_id: str) -> dict[str, Any]:
             session.commit()
             raise ValueError(job.error_message)
 
+        mod = MODULE_REGISTRY[tool_name]()
         evidence_id = job.evidence_id or params.get("evidence_id")
-        if not evidence_id:
+        if mod.requires_evidence and not evidence_id:
             job.status = JobStatus.FAILED
             job.error_message = "Missing evidence_id"
             job.completed_at = utcnow()
@@ -148,7 +169,9 @@ def execute_module_task(job_id: str) -> dict[str, Any]:
             session.commit()
             raise ValueError(job.error_message)
 
-        mod = MODULE_REGISTRY[tool_name]()
+        module_kwargs = dict(params or {})
+        module_kwargs.pop("case_id", None)
+        module_kwargs.pop("evidence_id", None)
         stdout_buf = StringIO()
         stderr_buf = StringIO()
 
@@ -180,7 +203,7 @@ def execute_module_task(job_id: str) -> dict[str, Any]:
                     signal.signal(signal.SIGALRM, old)
 
             with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf), alarm_ctx():
-                result = mod.run(job.case_id, evidence_id, **(params or {}))
+                result = mod.run(job.case_id, evidence_id, **module_kwargs)
                 if not isinstance(result, dict):
                     raise ValueError("Module returned non-dict result")
 
@@ -197,6 +220,25 @@ def execute_module_task(job_id: str) -> dict[str, Any]:
             job.completed_at = utcnow()
             session.add(job)
             session.commit()
+            # Chain-of-custody (file log): best effort
+            try:
+                from eviforge.core.custody import append_entry
+
+                actor = str((params or {}).get("actor") or "worker")
+                append_entry(
+                    settings.vault_dir / job.case_id / "chain_of_custody.log",
+                    actor=actor,
+                    action="job.complete",
+                    details={
+                        "job_id": job.id,
+                        "module": tool_name,
+                        "evidence_id": evidence_id,
+                        "status": "COMPLETED",
+                        "output_files": output_files,
+                    },
+                )
+            except Exception:
+                pass
             return {"job_id": job.id, "status": job.status, "output_files": output_files, "preview": preview}
 
         except Exception as e:
@@ -208,6 +250,24 @@ def execute_module_task(job_id: str) -> dict[str, Any]:
             job.completed_at = utcnow()
             session.add(job)
             session.commit()
+            try:
+                from eviforge.core.custody import append_entry
+
+                actor = str((params or {}).get("actor") or "worker")
+                append_entry(
+                    settings.vault_dir / job.case_id / "chain_of_custody.log",
+                    actor=actor,
+                    action="job.failed",
+                    details={
+                        "job_id": job.id,
+                        "module": tool_name,
+                        "evidence_id": evidence_id,
+                        "status": "FAILED",
+                        "error": str(e),
+                    },
+                )
+            except Exception:
+                pass
             raise
 
 

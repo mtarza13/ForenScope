@@ -43,18 +43,18 @@ def run_doctor() -> Dict[str, Any]:
     checks = []
     
     # SYSTEM BINARIES
-    for bin in ["file", "strings", "sha256sum", "exiftool", "yara", "tshark", "foremost"]:
+    for bin in ["file", "strings", "sha256sum", "exiftool", "yara", "tshark", "foremost", "bulk_extractor"]:
         res = check_binary(bin)
         res["name"] = f"binary:{bin}"
         checks.append(res)
         
     # PYTHON MODULES
     # Some are standard, some external
-    for mod in ["Evtx.Evtx", "Registry", "yara", "pyshark"]: 
+    for mod in ["Evtx.Evtx", "Registry", "yara", "pyshark"]:
         # Note: 'Evtx' is python-evtx? check import name. Usually 'Evtx.Evtx' or similar.
         # python-registry -> 'Registry'
         # yara-python -> 'yara'
-        res = check_python_module(mod.split('.')[0]) # rough check
+        res = check_python_module(mod)
         res["name"] = f"python:{mod}"
         checks.append(res)
 

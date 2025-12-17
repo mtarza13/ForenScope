@@ -65,6 +65,16 @@
                         <option value="parse_text">Parse Text (Tika)</option>
                         <option value="exif">Exif Metadata</option>
                         <option value="triage">Triage (Entropy/Type)</option>
+                        <option value="verify">Verify (Re-hash)</option>
+                        <option value="report">Report (Case HTML)</option>
+                        <option value="pcap">PCAP (tshark)</option>
+                        <option value="browser">Browser SQLite</option>
+                        <option value="email">Email (EML/MBOX)</option>
+                        <option value="evtx">EVTX (Windows Logs)</option>
+                        <option value="registry">Registry (Hives)</option>
+                        <option value="yara">YARA Scan</option>
+                        <option value="bulk">Bulk Extractor</option>
+                        <option value="carve">Carve (foremost)</option>
                     </select>
                     <input type="text" id="targetEvidenceId" placeholder="Evidence UUID">
                     <button onclick="runJob()" class="btn btn-primary">Run Module</button>
@@ -259,11 +269,12 @@
     async function runJob() {
         const module = document.getElementById('moduleSelect').value;
         const evidenceId = document.getElementById('targetEvidenceId').value;
-        if (!module || !evidenceId) return alert('Select module and Enter Evidence ID');
+        if (!module) return alert('Select module');
+        if (!evidenceId && module !== 'report') return alert('Enter Evidence ID (required for this module)');
 
         const res = await apiFetch(`/api/cases/${CASE_ID}/jobs`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module, evidence_id: evidenceId })
+            body: JSON.stringify({ module, evidence_id: evidenceId || null })
         });
         if (res.ok) { loadJobs(); switchTab('jobs'); } // Auto switch to jobs to see progress
         else alert('Run failed');
